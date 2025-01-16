@@ -12,8 +12,35 @@ def get_coordinates(location: str) -> (float, float):
         if loc:
             return loc.latitude, loc.longitude
     except Exception as e:
-        print(f"Error getting coordinates for {location}: {e}")
+        record_error(location, None, str(e), None)
     return None, None
+
+def record_error(location: str, neighborhood: str, error_message: str, crime_id: int):
+    """Record errors in a dedicated table and associate them with crimes."""
+    conn = psycopg2.connect(
+        dbname="crimap", user="postgres", password="postgres", host="localhost", port="5434"
+    )
+    cur = conn.cursor()
+
+    # Insert or get location error ID
+    cur.execute("""
+    INSERT INTO location_errors (location, neighborhood, error_message, is_city)
+    VALUES (%s, %s, %s, %s)
+    ON CONFLICT (location, neighborhood, is_city) DO UPDATE SET error_message = EXCLUDED.error_message
+    RETURNING id;
+    """, (location, neighborhood, error_message, neighborhood is None))
+    location_error_id = cur.fetchone()[0]
+
+    # Associate the location error with the crime
+    if crime_id:
+        cur.execute("""
+        INSERT INTO crime_location_errors (crime_id, location_error_id)
+        VALUES (%s, %s) ON CONFLICT DO NOTHING;
+        """, (crime_id, location_error_id))
+    conn.commit()
+
+    cur.close()
+    conn.close()
 
 def create_database():
     """Creates the database schema."""
@@ -21,42 +48,79 @@ def create_database():
         dbname="crimap", user="postgres", password="postgres", host="localhost", port="5434"
     )
     cur = conn.cursor()
-    
+
+    # Enable PostGIS extension
+    cur.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
+
     # Create tables
     cur.execute("""
     CREATE TABLE IF NOT EXISTS cities (
         id SERIAL PRIMARY KEY,
         name TEXT UNIQUE NOT NULL,
-        latitude FLOAT NOT NULL,
-        longitude FLOAT NOT NULL
+        geom GEOMETRY(POINT, 4326) NOT NULL,
+        UNIQUE (name, geom)
     );
 
     CREATE TABLE IF NOT EXISTS neighborhoods (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
-        city_id INT NOT NULL REFERENCES cities(id),
-        latitude FLOAT NOT NULL,
-        longitude FLOAT NOT NULL,
-        UNIQUE (name, city_id)
+        geom GEOMETRY(POINT, 4326) NOT NULL,
+        UNIQUE (name, geom)
     );
 
-    CREATE TABLE IF NOT EXISTS crime_types (
+    CREATE TABLE IF NOT EXISTS city_neighborhoods (
+        city_id INT NOT NULL REFERENCES cities(id),
+        neighborhood_id INT NOT NULL REFERENCES neighborhoods(id),
+        PRIMARY KEY (city_id, neighborhood_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,
-        category TEXT NOT NULL,
-        description TEXT NOT NULL,
-        UNIQUE (category, description)
+        name TEXT UNIQUE NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS subcategories (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        display_name TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS category_subcategories (
+        category_id INT NOT NULL REFERENCES categories(id),
+        subcategory_id INT NOT NULL REFERENCES subcategories(id),
+        PRIMARY KEY (category_id, subcategory_id)
     );
 
     CREATE TABLE IF NOT EXISTS crimes (
         id SERIAL PRIMARY KEY,
         crime_date DATE NOT NULL,
         crime_time TIME NOT NULL,
-        crime_type_id INT NOT NULL REFERENCES crime_types(id),
+        subcategory_id INT NOT NULL REFERENCES subcategories(id),
         city_id INT NOT NULL REFERENCES cities(id),
         neighborhood_id INT REFERENCES neighborhoods(id),
-        latitude FLOAT NOT NULL,
-        longitude FLOAT NOT NULL
+        geom GEOMETRY(POINT, 4326) NOT NULL
+    );     
+    
+    CREATE TABLE IF NOT EXISTS location_errors (
+        id SERIAL PRIMARY KEY,
+        location TEXT NOT NULL,
+        neighborhood TEXT,
+        error_message TEXT NOT NULL,
+        is_city BOOLEAN NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (location, neighborhood, is_city)
     );
+
+    CREATE TABLE IF NOT EXISTS crime_location_errors (
+        id SERIAL PRIMARY KEY,
+        crime_id INT NOT NULL REFERENCES crimes(id) ON DELETE CASCADE,
+        location_error_id INT NOT NULL REFERENCES location_errors(id) ON DELETE CASCADE,
+        UNIQUE (crime_id, location_error_id)
+    );          
+
+    CREATE INDEX IF NOT EXISTS idx_crimes_geom ON crimes USING GIST (geom);
+    CREATE INDEX IF NOT EXISTS idx_cities_geom ON cities USING GIST (geom);
+    CREATE INDEX IF NOT EXISTS idx_neighborhoods_geom ON neighborhoods USING GIST (geom);
     """)
     conn.commit()
     cur.close()
@@ -64,6 +128,7 @@ def create_database():
 
 def insert_or_get_id(cur, table: str, conflict_columns: list[str], values: dict) -> int:
     """Insert a record if it doesn't exist, and return its ID."""
+    # Attempt to insert the record
     cur.execute(sql.SQL("""
         INSERT INTO {table} ({columns})
         VALUES ({placeholders})
@@ -76,20 +141,48 @@ def insert_or_get_id(cur, table: str, conflict_columns: list[str], values: dict)
         conflict_columns=sql.SQL(", ").join(map(sql.Identifier, conflict_columns))
     ), tuple(values.values()))
 
+    # If the record was inserted, fetch the returned ID
     result = cur.fetchone()
     if result:
+        cur.connection.commit()
         return result[0]
 
+    # Perform SELECT to fetch the ID based on the given parameters
     cur.execute(sql.SQL("""
         SELECT id FROM {table} WHERE {conditions};
         """).format(
         table=sql.Identifier(table),
         conditions=sql.SQL(" AND ").join(
-            sql.SQL("{} = %s").format(sql.Identifier(k)) for k in conflict_columns
+            sql.SQL("{} = ST_GeomFromText(%s, 4326)").format(sql.Identifier(k))
+            if k == "geom" else sql.SQL("{} = %s").format(sql.Identifier(k))
+            for k in conflict_columns
         )
     ), tuple(values[k] for k in conflict_columns))
 
-    return cur.fetchone()[0]
+    result = cur.fetchone()
+    if result:
+        return result[0]
+    else:
+        raise ValueError(f"Could not find or insert record in table {table} with values: {values}")
+
+def preload_cache(cur):
+    """Preload the coordinates cache with data from the database."""
+    coordinates_cache = {}
+    cur.execute("""
+        SELECT c.name AS city, n.name AS neighborhood, ST_AsText(c.geom) AS city_geom, ST_AsText(n.geom) AS neighborhood_geom
+        FROM cities c
+        LEFT JOIN city_neighborhoods cn ON c.id = cn.city_id
+        LEFT JOIN neighborhoods n ON cn.neighborhood_id = n.id;
+    """)
+
+    for record in cur.fetchall():
+        city = record[0]
+        neighborhood = record[1]
+        city_geom = record[2]
+        neighborhood_geom = record[3]
+        coordinates_cache[(city, neighborhood)] = (city_geom, neighborhood_geom)
+
+    return coordinates_cache
 
 def process_csv(file_path, crime_categories, start_date: str, end_date: str):
     """Process the CSV file and insert data into the database."""
@@ -113,23 +206,34 @@ def process_csv(file_path, crime_categories, start_date: str, end_date: str):
     )
     cur = conn.cursor()
 
-    # Prepare a dictionary for cached coordinates
-    coordinates_cache = {}
+    # Preload cache with existing database data
+    coordinates_cache = preload_cache(cur)
 
     for _, row in df.iterrows():
-        crime_type_description = row["Tipo Enquadramento"]
-        category = next((k for k, v in crime_categories.items() if crime_type_description in v), None)
-        if not category:
-            # Skip if the type does not belong to any category
+        crime_type_description = row["Tipo Enquadramento"].upper()
+        category_name = next((k for k, v in crime_categories.items() if crime_type_description in v), None)
+        if not category_name:
             continue
 
-        # Insert or get the crime type ID
-        crime_type_id = insert_or_get_id(
-            cur, 
-            "crime_types", 
-            ["category", "description"], 
-            {"category": category, "description": crime_type_description}
+        # Insert or get category ID
+        print(category_name)
+        category_id = insert_or_get_id(
+            cur, "categories", ["name"], {"name": category_name}
         )
+
+        # Insert or get subcategory ID
+        subcategory_id = insert_or_get_id(
+            cur, "subcategories", ["name"], {"name": crime_type_description, "display_name": row["Tipo Enquadramento"]}
+        )
+
+        # Link category to subcategory
+        cur.execute(sql.SQL("""
+            INSERT INTO category_subcategories (category_id, subcategory_id)
+            VALUES (%s, %s) ON CONFLICT DO NOTHING;
+            """),
+            (category_id, subcategory_id)
+        )
+        conn.commit()
 
         city = row["Municipio Fato"]
         neighborhood = row["Bairro"] if pd.notna(row["Bairro"]) else None
@@ -137,57 +241,78 @@ def process_csv(file_path, crime_categories, start_date: str, end_date: str):
         # Check if the city and neighborhood combination already has coordinates in cache
         cache_key = (city, neighborhood)
         if cache_key in coordinates_cache:
-            city_lat, city_lon, neighborhood_lat, neighborhood_lon = coordinates_cache[cache_key]
+            city_geom, neighborhood_geom = coordinates_cache[cache_key]
         else:
             city_lat, city_lon = get_coordinates(city)
             if city_lat is None or city_lon is None:
-                continue
+                record_error(city, None, "City coordinates not found.", None)
+                city_geom = "SRID=4326;POINT(0 0)"
+            else:
+                city_geom = f"SRID=4326;POINT({city_lon} {city_lat})"
 
-            neighborhood_lat, neighborhood_lon = (None, None)
+            neighborhood_geom = None
             if neighborhood:
                 neighborhood_lat, neighborhood_lon = get_coordinates(f"{neighborhood}, {city}")
                 if neighborhood_lat is None or neighborhood_lon is None:
-                    neighborhood_lat, neighborhood_lon = city_lat, city_lon
+                    record_error(city, neighborhood, "Neighborhood coordinates not found.", None)
+                    neighborhood_geom = city_geom
+                else:
+                    neighborhood_geom = f"SRID=4326;POINT({neighborhood_lon} {neighborhood_lat})"
 
-            # Cache the coordinates
-            coordinates_cache[cache_key] = (city_lat, city_lon, neighborhood_lat, neighborhood_lon)
+            # Cache the geometries
+            coordinates_cache[cache_key] = (city_geom, neighborhood_geom)
 
         city_id = insert_or_get_id(
             cur, 
             "cities", 
             ["name"], 
-            {"name": city, "latitude": city_lat, "longitude": city_lon}
+            {"name": city, "geom": city_geom}
         )
 
         neighborhood_id = None
         if neighborhood:
+
             neighborhood_id = insert_or_get_id(
                 cur, 
                 "neighborhoods", 
-                ["name", "city_id"], 
-                {"name": neighborhood, "city_id": city_id, "latitude": neighborhood_lat, "longitude": neighborhood_lon}
+                ["name", "geom"], 
+                {"name": neighborhood, "geom": neighborhood_geom}
             )
 
-        latitude, longitude = (neighborhood_lat, neighborhood_lon) if neighborhood else (city_lat, city_lon)
+            # Link city to neighborhood
+            cur.execute(sql.SQL("""
+                INSERT INTO city_neighborhoods (city_id, neighborhood_id)
+                VALUES (%s, %s) ON CONFLICT DO NOTHING;
+                """),
+                (city_id, neighborhood_id)
+            )
+            conn.commit()
+
+        crime_geom = neighborhood_geom if neighborhood else city_geom
 
         cur.execute(
             sql.SQL("""
-                INSERT INTO crimes (crime_date, crime_time, crime_type_id, city_id, neighborhood_id, latitude, longitude)
-                VALUES (%s, %s, %s, %s, %s, %s, %s);
+                INSERT INTO crimes (crime_date, crime_time, subcategory_id, city_id, neighborhood_id, geom)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;
                 """),
             (
                 row["Data Fato"],
                 row["Hora Fato"],
-                crime_type_id,
+                subcategory_id,
                 city_id,
                 neighborhood_id,
-                latitude,
-                longitude
+                crime_geom
             )
         )
+        crime_id = cur.fetchone()[0]
+        conn.commit()
 
-    conn.commit()
-    cur.close()
+        # Record errors for invalid locations
+        if city_geom == "SRID=4326;POINT(0 0)":
+            record_error(city, None, "City coordinates not found.", crime_id)
+        if neighborhood and neighborhood_geom == city_geom:
+            record_error(city, neighborhood, "Neighborhood coordinates not found.", crime_id)
+
     conn.close()
 
 
@@ -268,8 +393,8 @@ def main():
 
     file_path = "excel_handler/SPJ_DADOS_ABERTOS_OCORRENCIAS_JAN_NOV2024.csv"  # Caminho do arquivo
 
-    start_date = "2024-01-01"  # Data inicial
-    end_date = "2024-01-05"    # Data final
+    start_date = "2024-01-03"  # Data inicial
+    end_date = "2024-01-03"    # Data final
 
     process_csv(file_path, tipos_desejados, start_date, end_date)
 
