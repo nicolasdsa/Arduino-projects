@@ -393,8 +393,8 @@ def main():
 
     file_path = "excel_handler/SPJ_DADOS_ABERTOS_OCORRENCIAS_JAN_NOV2024.csv"  # Caminho do arquivo
 
-    start_date = "2024-01-03"  # Data inicial
-    end_date = "2024-01-03"    # Data final
+    start_date = "2024-01-12"  # Data inicial
+    end_date = "2024-01-31"    # Data final
 
     process_csv(file_path, tipos_desejados, start_date, end_date)
 
