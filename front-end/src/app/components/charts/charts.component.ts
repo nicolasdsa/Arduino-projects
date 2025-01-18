@@ -1,35 +1,33 @@
-import { Component, AfterViewInit } from '@angular/core';
-import { Chart } from 'chart.js';
+import { Component, Input, AfterViewInit } from '@angular/core';
+import { Chart, ChartType, ChartOptions } from 'chart.js';
 
 @Component({
   selector: 'app-charts',
   templateUrl: './charts.component.html',
 })
 export class ChartsComponent implements AfterViewInit {
+  @Input() chartType: ChartType = 'bar';
+  @Input() chartData: any;
+  @Input() chartLabels: string[] = [];
+  @Input() chartOptions: ChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+  };
+
   ngAfterViewInit(): void {
-    this.createChart('chart1', 'Gráfico 1');
-    this.createChart('chart2', 'Gráfico 2');
+    if (this.chartData && this.chartLabels) {
+      this.createChart('dynamicChart');
+    }
   }
 
-  createChart(canvasId: string, label: string): void {
+  createChart(canvasId: string): void {
     new Chart(canvasId, {
-      type: 'bar',
+      type: this.chartType,
       data: {
-        labels: ['Jan', 'Feb', 'Mar', 'Apr'],
-        datasets: [
-          {
-            label: label,
-            data: [10, 20, 30, 40],
-            backgroundColor: 'rgba(75, 192, 192, 0.2)',
-            borderColor: 'rgba(75, 192, 192, 1)',
-            borderWidth: 1,
-          },
-        ],
+        labels: this.chartLabels,
+        datasets: this.chartData,
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-      },
+      options: this.chartOptions,
     });
   }
 }

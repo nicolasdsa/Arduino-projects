@@ -6,9 +6,9 @@ from datetime import datetime
 
 def get_coordinates(location: str) -> (float, float):
     """Get latitude and longitude for a given location."""
-    geolocator = Nominatim(user_agent="crime_mapping")
+    geolocator = Nominatim(user_agent="crime_mapping", timeout=10)
     try:
-        loc = geolocator.geocode(location)
+        loc = geolocator.geocode(f"{location}, Rio Grande do Sul, Brazil")
         if loc:
             return loc.latitude, loc.longitude
     except Exception as e:

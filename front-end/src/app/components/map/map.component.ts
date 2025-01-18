@@ -1,5 +1,16 @@
 import { Component, AfterViewInit } from '@angular/core';
 import * as L from 'leaflet';
+import 'leaflet.markercluster';
+import { HttpClient } from '@angular/common/http';
+
+// Corrigir os caminhos dos ícones do Leaflet
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'assets/leaflet/marker-icon-2x.png',
+  iconUrl: 'assets/leaflet/marker-icon.png',
+  shadowUrl: 'assets/leaflet/marker-shadow.png',
+});
 
 @Component({
   selector: 'app-map',
@@ -8,6 +19,12 @@ import * as L from 'leaflet';
 })
 export class MapComponent implements AfterViewInit {
   private map: L.Map | undefined;
+  private markerClusterGroup = L.markerClusterGroup();
+
+  constructor(private http: HttpClient) {}
+
+  startDate: string = '2024-01-01';
+  endDate: string = '2024-01-02';
 
   ngAfterViewInit(): void {
     // Inicializa o mapa
@@ -18,54 +35,71 @@ export class MapComponent implements AfterViewInit {
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(this.map);
 
-    // Garantir que o tamanho do mapa seja ajustado
-    setTimeout(() => {
-      this.map?.invalidateSize();
-    }, 0);
+    // Configura o MarkerClusterGroup
+    this.markerClusterGroup = L.markerClusterGroup({
+      iconCreateFunction: (cluster) => {
+        const count = cluster.getChildCount();
 
-    window.addEventListener('resize', () => {
-      this.map?.invalidateSize();
+        let clusterClass = ' marker-cluster-small';
+        if (count > 10 && count <= 50) {
+          clusterClass = ' marker-cluster-medium';
+        } else if (count > 50) {
+          clusterClass = ' marker-cluster-large';
+        }
+
+        return new L.DivIcon({
+          html: `<div><span>${count}</span></div>`,
+          className: 'marker-cluster' + clusterClass,
+          iconSize: L.point(40, 40),
+        });
+      },
     });
 
-    // Adiciona evento para capturar a movimentação
+    this.map.addLayer(this.markerClusterGroup);
+
+    // Adiciona eventos
     this.map.on('moveend', this.onMapMoveEnd.bind(this));
   }
 
-  // Função chamada quando o movimento termina
   private onMapMoveEnd(): void {
     if (!this.map) return;
 
-    // Obtém os limites visíveis no mapa
     const bounds = this.map.getBounds();
-
-    // Coordenadas dos cantos do mapa
-    const topLeft = bounds.getNorthWest(); // Canto superior esquerdo
-    const bottomRight = bounds.getSouthEast(); // Canto inferior direito
-
-    console.log('Bounds:', {
-      northWest: topLeft,
-      southEast: bottomRight,
-    });
-
-    // Chama a função para carregar dados com base nos limites
     this.fetchCoordinates(bounds);
   }
 
-  // Simula uma requisição para buscar dados
   private fetchCoordinates(bounds: L.LatLngBounds): void {
-    // Extrai os limites
     const { lat: north, lng: west } = bounds.getNorthWest();
     const { lat: south, lng: east } = bounds.getSouthEast();
 
-    // Simula uma requisição com as coordenadas visíveis
-    console.log('Fazendo requisição com os limites:', {
+    const requestBody = {
       north,
       west,
       south,
       east,
-    });
+      startDate: this.startDate,
+      endDate: this.endDate,
+    };
 
-    // Aqui você faria sua requisição HTTP real
-    // Por exemplo: this.http.get('api/coordinates', { params: { north, west, south, east } }).subscribe(...)
+    // Faz a requisição HTTP
+    this.http
+      .post<any[]>('http://localhost:8000/getAll', requestBody)
+      .subscribe(
+        (response) => {
+          this.updateMap(response);
+        },
+        (error) => {
+          console.error('Erro ao buscar coordenadas:', error);
+        }
+      );
+  }
+
+  private updateMap(data: any[]): void {
+    this.markerClusterGroup.clearLayers();
+
+    data.forEach((point) => {
+      const marker = L.marker([point.latitude, point.longitude]);
+      this.markerClusterGroup.addLayer(marker);
+    });
   }
 }
