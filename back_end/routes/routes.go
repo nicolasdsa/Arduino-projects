@@ -9,6 +9,7 @@ import (
 
 func CarregaRotas() {
 	//http.Handle("/getAll", controllers.GetCrimesHandler(nil))
-	http.Handle("/getAll", middlewares.CorsMiddleware(controllers.GetCrimesHandler(nil)))
+	http.Handle("/getAll", middlewares.CorsMiddleware(controllers.GetCrimes(nil)))
+	http.Handle("/categories", middlewares.CorsMiddleware(controllers.GetCategories(nil)))
 
 }

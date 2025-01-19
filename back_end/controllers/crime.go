@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"crimemap.com/map/dto"
@@ -17,7 +18,7 @@ type Coordinates struct {
 	North float64 `json:"north"`
 }
 
-func GetCrimesHandler(conn *pgx.Conn) http.HandlerFunc {
+func GetCrimes(conn *pgx.Conn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var filter dto.CrimeFilter
 		if err := json.NewDecoder(r.Body).Decode(&filter); err != nil {
@@ -32,7 +33,7 @@ func GetCrimesHandler(conn *pgx.Conn) http.HandlerFunc {
 		}
 
 		// Consultar os crimes no banco de dados
-		crimes, err := models.GetCrimesWithinCoordinatesAndDate(context.Background(), conn, filter)
+		crimes, err := models.GetCrimes(context.Background(), conn, filter)
 		if err != nil {
 			http.Error(w, "Database query error: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -40,6 +41,8 @@ func GetCrimesHandler(conn *pgx.Conn) http.HandlerFunc {
 
 		// Retornar os crimes encontrados
 		w.Header().Set("Content-Type", "application/json")
+		fmt.Println(crimes)
+
 		json.NewEncoder(w).Encode(crimes)
 	}
 }

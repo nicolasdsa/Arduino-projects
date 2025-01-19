@@ -5,12 +5,12 @@ import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
 import { MapComponent } from './components/map/map.component';
 import { ChartsComponent } from './components/charts/charts.component';
-import { FiltersComponent } from './components/filters/filters.component';
+import { FilterComponent } from './components/filters/filters.component';
 import { FormsModule } from '@angular/forms';
 import { HttpClientModule } from '@angular/common/http';
 
 @NgModule({
-  declarations: [AppComponent, MapComponent, ChartsComponent, FiltersComponent],
+  declarations: [AppComponent, MapComponent, ChartsComponent, FilterComponent],
   imports: [BrowserModule, AppRoutingModule, FormsModule, HttpClientModule],
   providers: [],
   bootstrap: [AppComponent],

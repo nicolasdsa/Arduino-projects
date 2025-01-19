@@ -1,4 +1,27 @@
-<div>
-  <label> <input type="checkbox" (change)="toggleFilter('A')" /> Tipo A </label>
-  <label> <input type="checkbox" (change)="toggleFilter('B')" /> Tipo B </label>
+<div class="filter-container">
+  <h3>Filtros</h3>
+  <ul>
+    <li *ngFor="let category of categories">
+      <div>
+        <input
+          type="checkbox"
+          [checked]="category.checked"
+          (change)="toggleCategory(category)"
+        />
+        <span>{{ category.name }}</span>
+      </div>
+      <ul>
+        <li *ngFor="let subcategory of category.subcategories">
+          <div>
+            <input
+              type="checkbox"
+              [checked]="subcategory.checked"
+              (change)="toggleSubcategory(category, subcategory)"
+            />
+            <span>{{ subcategory.display_name }}</span>
+          </div>
+        </li>
+      </ul>
+    </li>
+  </ul>
 </div>

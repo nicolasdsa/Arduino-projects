@@ -6,12 +6,14 @@ import (
 )
 
 type CrimeFilter struct {
-	East      *float64 `json:"east"`
-	West      *float64 `json:"west"`
-	South     *float64 `json:"south"`
-	North     *float64 `json:"north"`
-	StartDate string   `json:"startDate"`
-	EndDate   string   `json:"endDate"`
+	East       *float64 `json:"east"`
+	West       *float64 `json:"west"`
+	South      *float64 `json:"south"`
+	North      *float64 `json:"north"`
+	StartDate  string   `json:"startDate"`
+	EndDate    string   `json:"endDate"`
+	ExcludedIDs []int    `json:"excludedIDs,omitempty"`
+	Subcategories []int    `json:"subCategories,omitempty"`
 }
 
 func (cf *CrimeFilter) Validate() error {
