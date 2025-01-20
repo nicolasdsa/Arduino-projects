@@ -1,7 +1,14 @@
 <div class="filter-container">
   <h3>Filtros</h3>
-  <ul>
-    <li *ngFor="let category of categories">
+  <button (click)="toggleAllSubcategories()" class="details-button">
+    {{
+      showDetailedFilters
+        ? "Ocultar Filtros Detalhados"
+        : "Mostrar Filtros Detalhados"
+    }}
+  </button>
+  <div class="categories">
+    <div class="category" *ngFor="let category of categories">
       <div>
         <input
           type="checkbox"
@@ -10,7 +17,7 @@
         />
         <span>{{ category.name }}</span>
       </div>
-      <ul>
+      <ul *ngIf="showDetailedFilters">
         <li *ngFor="let subcategory of category.subcategories">
           <div>
             <input
@@ -22,6 +29,6 @@
           </div>
         </li>
       </ul>
-    </li>
-  </ul>
+    </div>
+  </div>
 </div>

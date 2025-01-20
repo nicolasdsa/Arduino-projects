@@ -32,16 +32,8 @@ export class MapComponent implements AfterViewInit {
     });
     this.filterService.subcategories$.subscribe((subcategories) => {
       this.selectedSubcategories = subcategories;
-      this.updateMapFilter();
+      this.updateMapFilter(this.startDate, this.endDate);
     });
-  }
-
-  private updateMapWithSubcategories(): void {
-    // Atualize o mapa usando os IDs das subcategorias selecionadas
-    if (!this.map) return;
-
-    const bounds = this.map.getBounds();
-    this.fetchCoordinates(bounds);
   }
 
   private map: L.Map | undefined;
@@ -128,7 +120,10 @@ export class MapComponent implements AfterViewInit {
   }
 
   public updateMap(data: any[]): void {
-    if (!data) return;
+    if (!data) {
+      this.updateMapFilter(this.startDate, this.endDate);
+      return;
+    }
     // 2. Processar novos pontos em lote
     const newPoints = data.filter((point) => !this.loadedCrimes.has(point.id));
 
@@ -137,44 +132,72 @@ export class MapComponent implements AfterViewInit {
       this.loadedCrimes.set(point.id, point);
     });
 
-    this.updateMapFilter();
+    this.updateMapFilter(this.startDate, this.endDate);
   }
 
-  public updateMapFilter(): void {
+  public updateMapFilter(startDate: string, endDate: string): void {
+    // 1. Pré-processar as datas uma única vez
+    const start = new Date(startDate).getTime();
+    const end = new Date(endDate).getTime();
     const selectedSubcategoriesSet = new Set(this.selectedSubcategories);
+
+    // 2. Criar índices temporários para otimizar buscas
+    const visibleLayers = new Set();
     const layersToRemove: any[] = [];
 
-    console.log('alo');
-
+    // 3. Processar camadas existentes com menos conversões de data
     this.markerClusterGroup.eachLayer((layer: any) => {
-      console.log(layer.options.subcategory_id);
-      if (!selectedSubcategoriesSet.has(layer.options.subcategory_id)) {
+      const crimeTime = new Date(layer.options.crimeDate).getTime();
+
+      if (
+        !selectedSubcategoriesSet.has(layer.options.subcategory_id) ||
+        crimeTime < start ||
+        crimeTime > end
+      ) {
         layersToRemove.push(layer);
+      } else {
+        visibleLayers.add(layer.options.id);
       }
     });
 
+    // 4. Remover camadas em lote
     if (layersToRemove.length > 0) {
       this.markerClusterGroup.removeLayers(layersToRemove);
     }
 
-    // 5. Adicionar novos marcadores em lote
+    // 5. Preparar novos marcadores com menos conversões de data
     const newMarkers: L.Layer[] = [];
+
     this.loadedCrimes.forEach((point, id) => {
-      if (
-        selectedSubcategoriesSet.has(point.subcategory_id) &&
-        !this.markerClusterGroup.getLayer(id)
-      ) {
-        newMarkers.push(
-          L.marker([point.latitude, point.longitude], {
-            id: point.id,
-            subcategoryId: point.subcategory_id,
-          } as any)
-        );
+      if (!visibleLayers.has(point.id)) {
+        const crimeTime = new Date(point.crime_date).getTime();
+
+        if (
+          selectedSubcategoriesSet.has(point.subcategory_id) &&
+          crimeTime >= start &&
+          crimeTime <= end
+        ) {
+          newMarkers.push(
+            L.marker([point.latitude, point.longitude], {
+              id: point.id,
+              subcategoryId: point.subcategory_id,
+              crimeDate: point.crime_date,
+            } as any)
+          );
+        }
       }
     });
 
+    // 6. Adicionar novos marcadores em lote
     if (newMarkers.length > 0) {
       this.markerClusterGroup.addLayers(newMarkers);
+    }
+  }
+
+  onDateChange(): void {
+    if (this.map) {
+      const bounds = this.map.getBounds();
+      this.fetchCoordinates(bounds);
     }
   }
 }

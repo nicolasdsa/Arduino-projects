@@ -10,6 +10,7 @@ import { FilterService } from 'src/app/services/filters.service';
 export class FilterComponent implements OnInit {
   categories: any[] = [];
   selectedSubcategories: Set<number> = new Set();
+  showDetailedFilters: boolean = false; // Estado global para controlar a visibilidade das subcategorias
 
   constructor(private filterService: FilterService, private http: HttpClient) {}
 
@@ -20,11 +21,16 @@ export class FilterComponent implements OnInit {
   fetchCategories(): void {
     this.http.get<any[]>('http://localhost:8000/categories').subscribe(
       (response) => {
-        this.categories = response;
+        this.categories = response.map((category) => ({
+          ...category,
+          checked: true, // Marca a categoria por padrão
+          subcategories: category.subcategories.map((subcategory: any) => ({
+            ...subcategory,
+            checked: true, // Marca a subcategoria por padrão
+          })),
+        }));
         this.categories.forEach((category) => {
-          category.checked = true;
           category.subcategories.forEach((subcategory: any) => {
-            subcategory.checked = true;
             this.selectedSubcategories.add(subcategory.id);
           });
         });
@@ -59,5 +65,9 @@ export class FilterComponent implements OnInit {
 
     category.checked = category.subcategories.every((sub: any) => sub.checked);
     this.filterService.updateSubcategories(this.selectedSubcategories);
+  }
+
+  toggleAllSubcategories(): void {
+    this.showDetailedFilters = !this.showDetailedFilters;
   }
 }

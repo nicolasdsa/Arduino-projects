@@ -1,8 +1,18 @@
 <div class="controls">
   <label for="startDate">Start Date:</label>
-  <input type="date" id="startDate" [(ngModel)]="startDate" />
+  <input
+    type="date"
+    id="startDate"
+    [(ngModel)]="startDate"
+    (ngModelChange)="onDateChange()"
+  />
 
   <label for="endDate">End Date:</label>
-  <input type="date" id="endDate" [(ngModel)]="endDate" />
+  <input
+    type="date"
+    id="endDate"
+    [(ngModel)]="endDate"
+    (ngModelChange)="onDateChange()"
+  />
 </div>
 <div id="map"></div>
