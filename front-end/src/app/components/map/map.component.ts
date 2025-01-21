@@ -4,6 +4,7 @@ import 'leaflet.markercluster';
 import { HttpClient } from '@angular/common/http';
 import { debounceTime, Subject, Subscription } from 'rxjs';
 import { FilterService } from 'src/app/services/filters.service';
+import { CrimeDataService } from 'src/app/services/crime-data.service';
 
 // Corrigir os caminhos dos ícones do Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -23,7 +24,11 @@ export class MapComponent implements AfterViewInit {
   selectedSubcategories: Set<number> = new Set();
   private movementSubject = new Subject<void>(); // Controle de debounce
 
-  constructor(private filterService: FilterService, private http: HttpClient) {
+  constructor(
+    private filterService: FilterService,
+    private http: HttpClient,
+    private crimeDataService: CrimeDataService
+  ) {
     this.movementSubject.pipe(debounceTime(300)).subscribe(() => {
       if (this.map) {
         const bounds = this.map.getBounds();
@@ -136,6 +141,8 @@ export class MapComponent implements AfterViewInit {
   }
 
   public updateMapFilter(startDate: string, endDate: string): void {
+    let test = new Map<number, any>(); // Cache local de crimes
+
     // 1. Pré-processar as datas uma única vez
     const start = new Date(startDate).getTime();
     const end = new Date(endDate).getTime();
@@ -177,6 +184,8 @@ export class MapComponent implements AfterViewInit {
           crimeTime >= start &&
           crimeTime <= end
         ) {
+          test.set(point.id, point);
+
           newMarkers.push(
             L.marker([point.latitude, point.longitude], {
               id: point.id,
@@ -187,6 +196,8 @@ export class MapComponent implements AfterViewInit {
         }
       }
     });
+
+    this.crimeDataService.setCrimes(Array.from(test.values()));
 
     // 6. Adicionar novos marcadores em lote
     if (newMarkers.length > 0) {

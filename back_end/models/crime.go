@@ -17,6 +17,8 @@ type Crime struct {
 	Latitude       float64        `json:"latitude"`
 	Longitude      float64        `json:"longitude"`
 	SubcategoriaId      int    		`json:"subcategory_id"`
+	CrimeTime      time.Time         `json:"crime_time"`
+	CategoryName   string         `json:"category_name"`
 }
 
 func GetCrimes(ctx context.Context, conn *pgx.Conn, filter dto.CrimeFilter) ([]Crime, error) {
@@ -28,12 +30,16 @@ func GetCrimes(ctx context.Context, conn *pgx.Conn, filter dto.CrimeFilter) ([]C
 
 	query := `
         SELECT 
-            id,
+            crimes.id,
             ST_X(geom) AS longitude,
             ST_Y(geom) AS latitude,
             crime_date,
-						subcategory_id
+						crime_time,
+						crimes.subcategory_id,
+						categories.name AS category_name
         FROM crimes
+				JOIN category_subcategories ON crimes.subcategory_id = category_subcategories.subcategory_id
+				JOIN categories ON category_subcategories.category_id = categories.id
         WHERE ST_Within(
             geom,
             ST_MakeEnvelope($1, $2, $3, $4, 4326)
@@ -49,11 +55,11 @@ func GetCrimes(ctx context.Context, conn *pgx.Conn, filter dto.CrimeFilter) ([]C
 
 	// Adiciona lógica para exclusão de IDs
 	if len(filter.ExcludedIDs) > 0 {
-		query += " AND id != ALL($7)"
+		query += " AND crimes.id != ALL($7)"
 		args = append(args, filter.ExcludedIDs)
 	} else {
 		// Passa um array vazio explicitamente tipado
-		query += " AND id != ALL('{}'::int[])"
+		query += " AND  crimes.id != ALL('{}'::int[])"
 	}
 
 	rows, err := conn.Query(ctx, query, args...)
@@ -66,7 +72,7 @@ func GetCrimes(ctx context.Context, conn *pgx.Conn, filter dto.CrimeFilter) ([]C
 	var crimes []Crime
 	for rows.Next() {
 		var crime Crime
-		if err := rows.Scan(&crime.ID, &crime.Longitude, &crime.Latitude, &crime.CrimeDate, &crime.SubcategoriaId); err != nil {
+		if err := rows.Scan(&crime.ID, &crime.Longitude, &crime.Latitude, &crime.CrimeDate, &crime.CrimeTime, &crime.SubcategoriaId, &crime.CategoryName); err != nil {
 			log.Printf("Row scan error: %v", err)
 			continue
 		}
